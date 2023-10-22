@@ -41,7 +41,7 @@ type UserMessage struct {
 	Content string
 }
 
-func (m UserMessage) ContentToData() any {
+func (m *UserMessage) ContentToData() any {
 	if m.Element == List {
 		return strings.Split(m.Content, "\n")
 	}

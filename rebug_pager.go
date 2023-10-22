@@ -2,6 +2,7 @@ package rebugpager
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -23,6 +24,7 @@ func init() {
 // it's better to store these globally in memory outside of the http handler.
 type RebugPager struct {
 	db *Database
+	tc *TwilioClient
 }
 
 func NewRebugPager() (*RebugPager, error) {
@@ -31,12 +33,13 @@ func NewRebugPager() (*RebugPager, error) {
 	if p.db, err = NewFirestore(); err != nil {
 		return p, err
 	}
+	p.tc = NewTwilio()
 	return p, nil
 }
 
 func (p *RebugPager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-	// Closure for failures.
+	// Closure for http response.
 	handleResponse := func(statusCode int) {
 		message := "Success!"
 		if statusCode != 200 && statusCode != 201 {
@@ -45,11 +48,6 @@ func (p *RebugPager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(statusCode)
 		json.NewEncoder(w).Encode(map[string]string{"Response": message})
-	}
-
-	// Validate auth.
-	if err := DoAuth(); err != nil {
-		handleResponse(http.StatusForbidden)
 	}
 
 	// Parse input.
@@ -66,13 +64,19 @@ func (p *RebugPager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Validate auth.
+	if err := p.DoAuth(data, r); err != nil {
+		handleResponse(http.StatusForbidden)
+	}
+
+	// Parse message.
 	message, err := ParseMessage(data["Body"])
 	if err != nil {
 		handleResponse(http.StatusBadRequest)
 		return
 	}
 
-	// fetch existing doc
+	// Fetch existing doc.
 	docPath := fmt.Sprintf("inbound/pager/sessions/%s", message.DocID)
 	var docData UserDoc
 	if err := p.db.GetDoc(docPath, &docData); err != nil {
@@ -86,11 +90,15 @@ func (p *RebugPager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// respond
+	// Respond.
 	handleResponse(http.StatusCreated)
 }
 
-func DoAuth() error {
-	// https://www.twilio.com/docs/usage/webhooks/webhooks-security
-	return nil
+// https://www.twilio.com/docs/usage/webhooks/webhooks-security
+func (p *RebugPager) DoAuth(params map[string]string, r *http.Request) error {
+	signature := r.Header.Get("x-twilio-signature")
+	if len(signature) > 0 && p.tc.Validate(params, signature) {
+		return nil
+	}
+	return errors.New("Unable to validate incomming request.")
 }
