@@ -24,7 +24,7 @@ func (e ElementType) ToString() string {
 	return "p"
 }
 func ElementFromString(s string) (ElementType, bool) {
-	switch s {
+	switch strings.ToLower(s) {
 	case "p":
 		return Paragraph, true
 	case "h":

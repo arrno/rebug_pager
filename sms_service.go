@@ -1,6 +1,8 @@
 package rebugpager
 
 import (
+	"errors"
+	"net/http"
 	"os"
 
 	"github.com/twilio/twilio-go/client"
@@ -19,7 +21,11 @@ func NewTwilio() *TwilioClient {
 	return &tc
 }
 
-// signature is x-twilio-signature header
-func (tc *TwilioClient) Validate(params map[string]string, signature string) bool {
-	return tc.validator.Validate(tc.callbackUrl, params, signature)
+// https://www.twilio.com/docs/usage/webhooks/webhooks-security
+func (tc *TwilioClient) DoAuth(params map[string]string, r *http.Request) error {
+	signature := r.Header.Get("x-twilio-signature")
+	if len(signature) > 0 && tc.validator.Validate(r.RequestURI, params, signature) {
+		return nil
+	}
+	return errors.New("Unable to validate incomming request.")
 }
