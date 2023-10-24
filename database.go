@@ -3,6 +3,7 @@ package rebugpager
 import (
 	"context"
 	"errors"
+	"os"
 
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go"
@@ -16,7 +17,7 @@ type Database struct {
 
 func NewFirestore() (*Database, error) {
 	ctx := context.Background()
-	sa := option.WithCredentialsFile("./serviceAccount.json")
+	sa := option.WithCredentialsJSON([]byte(os.Getenv("FIREBASE_AUTH")))
 	app, err := firebase.NewApp(ctx, nil, sa)
 	if err != nil {
 		return nil, err

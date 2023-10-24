@@ -6,6 +6,7 @@ require (
 	cloud.google.com/go/firestore v1.9.0
 	firebase.google.com/go v3.13.0+incompatible
 	github.com/GoogleCloudPlatform/functions-framework-go v1.8.0
+	github.com/google/martian/v3 v3.3.2
 	github.com/twilio/twilio-go v1.15.0
 	google.golang.org/api v0.126.0
 )
