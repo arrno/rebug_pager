@@ -3,7 +3,6 @@ package rebugpager
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -80,23 +79,19 @@ func ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse message.
-	message, err := ParseMessage(data["Body"])
-	if err != nil {
+	// Fetch existing doc.
+	docPath, docData, initialSync, err := HandleUserDoc(db, data["Body"], data["From"])
+	if err != nil && err.Error() == "No doc found." {
 		handleResponse(http.StatusBadRequest)
+		return
+	} else if err != nil {
+		handleResponse(http.StatusInternalServerError)
 		return
 	}
 
-	// Fetch existing doc.
-	docPath := fmt.Sprintf("inbound/pager/sessions/%s", message.DocID)
-	var docData UserDoc
-	if err := db.GetDoc(docPath, &docData); err != nil {
-		handleResponse(http.StatusBadRequest)
-		return
-	}
 	// Update and write back to db.
-	docData = MergeDoc(docData, message)
-	if err := db.WriteDoc(docPath, docData); err != nil {
+	newDocData := MergeAutoDoc(*docData, data["Body"], data, initialSync)
+	if err := db.WriteDoc(docPath, newDocData); err != nil {
 		handleResponse(http.StatusInternalServerError)
 		return
 	}

@@ -7,12 +7,24 @@ import (
 
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
 type Database struct {
 	client *firestore.Client
 	ctx    context.Context
+}
+
+type Query struct {
+	path  string
+	op    string
+	value interface{}
+}
+
+type OrderBy struct {
+	path string
+	dir  firestore.Direction
 }
 
 func NewFirestore() (*Database, error) {
@@ -44,6 +56,34 @@ func (db *Database) GetDoc(path string, target any) error {
 	return nil
 }
 
+func (db *Database) QueryDocs(path string, queries []Query, orderBy OrderBy) ([]map[string]any, error) {
+	results := []map[string]any{}
+	if len(queries) == 0 {
+		return results, errors.New("Function meant to be run with queries.")
+	}
+	ref := db.client.Collection(path)
+	if ref == nil {
+		return results, errors.New("Invalid collection path")
+	}
+	query := ref.Where(queries[0].path, queries[0].op, queries[0].value)
+	for _, q := range queries[1:] {
+		query = query.Where(q.path, q.op, q.value)
+	}
+	iter := query.OrderBy(orderBy.path, orderBy.dir).Documents(db.ctx)
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return results, err
+		}
+		results = append(results, snap.Data())
+		results[len(results)-1]["docPath"] = snap.Ref.Path
+	}
+	return results, nil
+}
+
 func (db *Database) WriteDoc(path string, data any) error {
 	if ref := db.client.Doc(path); ref == nil {
 		return errors.New("Invalid doc path")
@@ -57,6 +97,15 @@ func (db *Database) AddDoc(path string, data any) error {
 	if ref := db.client.Collection(path); ref == nil {
 		return errors.New("Invalid collection path")
 	} else if _, _, err := ref.Add(db.ctx, data); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *Database) DeleteDoc(path string) error {
+	if ref := db.client.Doc(path); ref == nil {
+		return errors.New("Invalid doc path")
+	} else if _, err := ref.Delete(db.ctx); err != nil {
 		return err
 	}
 	return nil
