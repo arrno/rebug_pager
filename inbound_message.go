@@ -1,6 +1,7 @@
 package rebugpager
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -54,38 +55,49 @@ func (m *ElementMessage) ContentToData() any {
 }
 
 type DocElement struct {
-	ElementType    string `firestore:"Type"`
-	ElementContent any    `firestore:"Content"`
+	ElementType    string `firestore:"Type" json:"Type"`
+	ElementContent any    `firestore:"Content" json:"Content"`
 }
 
 type UserDoc struct {
 	CreatedAt  time.Time    `firestore:"createdAt"`
 	UpdatedAt  time.Time    `firestore:"updatedAt"`
+	SyncedAt   time.Time    `firestore:"syncedAt"`
 	FromNumber string       `firestore:"fromNumber"`
 	Elements   []DocElement `firestore:"elements"`
 }
 
-func (u *UserDoc) FromMap(data map[string]any) {
+func (u *UserDoc) FromMap(data map[string]any) error {
 	if val, ok := data["createdAt"]; ok {
 		if cval, ok := val.(time.Time); ok {
 			u.CreatedAt = cval
 		}
 	}
-	if val, ok := data["createdAt"]; ok {
+	if val, ok := data["updatedAt"]; ok {
 		if cval, ok := val.(time.Time); ok {
 			u.UpdatedAt = cval
 		}
 	}
-	if val, ok := data["FromNumber"]; ok {
+	if val, ok := data["syncedAt"]; ok {
+		if cval, ok := val.(time.Time); ok {
+			u.SyncedAt = cval
+		}
+	}
+	if val, ok := data["fromNumber"]; ok {
 		if cval, ok := val.(string); ok {
 			u.FromNumber = cval
 		}
 	}
 	if val, ok := data["elements"]; ok {
-		if cval, ok := val.([]DocElement); ok {
+		if b, err := json.Marshal(val); err != nil {
+			return err
+		} else {
+			var cval []DocElement
+			json.Unmarshal(b, &cval)
 			u.Elements = cval
 		}
 	}
+	return nil
 }
 
 func ParseElementMessage(content string) (ElementMessage, error) {
@@ -129,6 +141,9 @@ func MergeAutoDoc(doc UserDoc, message string, data map[string]string, initialSy
 			ElementType:    "p",
 			ElementContent: message,
 		})
+	} else {
+		doc.SyncedAt = time.Now()
+		doc.Elements = []DocElement{}
 	}
 	doc.FromNumber = data["From"]
 	return doc
@@ -152,14 +167,21 @@ func HandleUserDoc(db *Database, messageBody string, fromNumber string) (string,
 	explicitDocPath := ""
 	var explicitDocData map[string]any
 	if len(words) > 0 && len(words[0]) == 6 {
-		if err := db.GetDoc(fmt.Sprintf("inbound/pager/sessions/%s", words[0]), explicitDocData); err != nil && status.Code(err) != codes.NotFound {
+		if err := db.GetDoc(fmt.Sprintf("inbound/pager/sessions/%s", words[0]), &explicitDocData); err != nil && status.Code(err) != codes.NotFound {
 			return "", userDoc, false, err
 		} else if status.Code(err) != codes.NotFound {
 			explicitDocPath = fmt.Sprintf("inbound/pager/sessions/%s", words[0])
 		}
 	}
+
+	var docFromString string
+	if docFrom, ok := explicitDocData["fromNumber"]; !ok {
+		docFromString = ""
+	} else if docFromString, ok = docFrom.(string); !ok {
+		return "", userDoc, false, errors.New("Malformed document.")
+	}
 	// We have an explicit match and it's unclaimed or claimed by the caller.
-	if explicitDocPath != "" && (explicitDocData["fromNumber"].(string) == "" || explicitDocData["fromNumber"].(string) == fromNumber) {
+	if explicitDocPath != "" && (docFromString == "" || docFromString == fromNumber) {
 		for _, d := range existingDocs {
 			if val, ok := d["docPath"]; ok && val.(string) != explicitDocPath {
 				if err := db.DeleteDoc(val.(string)); err != nil {
@@ -167,9 +189,9 @@ func HandleUserDoc(db *Database, messageBody string, fromNumber string) (string,
 				}
 			}
 		}
-		userDoc.FromMap(explicitDocData)
+		err := userDoc.FromMap(explicitDocData)
 		// If the doc has not been claimed all we do is claim it for the caller... if it has, we append the full body.
-		return explicitDocPath, userDoc, explicitDocData["fromNumber"].(string) == "", nil
+		return explicitDocPath, userDoc, docFromString == "", err
 	}
 	if len(existingDocs) > 1 {
 		for _, doc := range existingDocs[1:] {
@@ -185,6 +207,6 @@ func HandleUserDoc(db *Database, messageBody string, fromNumber string) (string,
 		return "", userDoc, false, errors.New("No doc found.")
 	}
 	// There is no valid explicit doc but we have latest claimed doc for the caller.
-	userDoc.FromMap(existingDocs[0])
-	return existingDocs[0]["docPath"].(string), userDoc, false, nil
+	err = userDoc.FromMap(existingDocs[0])
+	return existingDocs[0]["docPath"].(string), userDoc, false, err
 }

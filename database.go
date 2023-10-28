@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 
 	"cloud.google.com/go/firestore"
 	firebase "firebase.google.com/go"
@@ -79,7 +80,7 @@ func (db *Database) QueryDocs(path string, queries []Query, orderBy OrderBy) ([]
 			return results, err
 		}
 		results = append(results, snap.Data())
-		results[len(results)-1]["docPath"] = snap.Ref.Path
+		results[len(results)-1]["docPath"] = strings.Split(snap.Ref.Path, "(default)/documents/")[1]
 	}
 	return results, nil
 }

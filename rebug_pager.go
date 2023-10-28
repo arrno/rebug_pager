@@ -3,6 +3,7 @@ package rebugpager
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -27,7 +28,10 @@ func ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// Closure for http response.
-	handleResponse := func(statusCode int) {
+	handleResponse := func(statusCode int, err error) {
+		if err != nil {
+			fmt.Println(err.Error())
+		}
 		logData := map[string]any{
 			"payload":    data,
 			"statusCode": statusCode,
@@ -53,7 +57,7 @@ func ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	db, err = NewFirestore()
 	if err != nil {
-		handleResponse(http.StatusInternalServerError)
+		handleResponse(http.StatusInternalServerError, err)
 		return
 	}
 	defer db.client.Close()
@@ -62,10 +66,10 @@ func ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Parse input.
 	data = map[string]string{}
 	if b, err := io.ReadAll(r.Body); err != nil {
-		handleResponse(http.StatusBadRequest)
+		handleResponse(http.StatusBadRequest, err)
 		return
 	} else if params, err := url.ParseQuery(string(b)); err != nil {
-		handleResponse(http.StatusBadRequest)
+		handleResponse(http.StatusBadRequest, err)
 		return
 	} else {
 		for key := range params {
@@ -75,29 +79,29 @@ func ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Validate auth.
 	if err := BasicAuth(r); err != nil {
-		handleResponse(http.StatusUnauthorized)
+		handleResponse(http.StatusUnauthorized, err)
 		return
 	}
 
 	// Fetch existing doc.
 	docPath, docData, initialSync, err := HandleUserDoc(db, data["Body"], data["From"])
 	if err != nil && err.Error() == "No doc found." {
-		handleResponse(http.StatusBadRequest)
+		handleResponse(http.StatusBadRequest, err)
 		return
 	} else if err != nil {
-		handleResponse(http.StatusInternalServerError)
+		handleResponse(http.StatusInternalServerError, err)
 		return
 	}
 
 	// Update and write back to db.
 	newDocData := MergeAutoDoc(*docData, data["Body"], data, initialSync)
 	if err := db.WriteDoc(docPath, newDocData); err != nil {
-		handleResponse(http.StatusInternalServerError)
+		handleResponse(http.StatusInternalServerError, err)
 		return
 	}
 
 	// Respond.
-	handleResponse(http.StatusCreated)
+	handleResponse(http.StatusCreated, nil)
 }
 
 func BasicAuth(r *http.Request) error {
