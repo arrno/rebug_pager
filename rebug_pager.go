@@ -94,8 +94,10 @@ func ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update and write back to db.
-	newDocData := MergeAutoDoc(*docData, data["Body"], data, initialSync)
-	if err := db.WriteDoc(docPath, newDocData); err != nil {
+	if newDocData, err := MergeAutoDoc(*docData, data["Body"], data, initialSync); err != nil {
+		handleResponse(http.StatusInternalServerError, err)
+		return
+	} else if err := db.WriteDoc(docPath, newDocData); err != nil {
 		handleResponse(http.StatusInternalServerError, err)
 		return
 	}

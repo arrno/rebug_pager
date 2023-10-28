@@ -1,6 +1,8 @@
 package rebugpager
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,7 +136,16 @@ func MergeElementDoc(doc UserDoc, message ElementMessage, data map[string]string
 	return doc
 }
 
-func MergeAutoDoc(doc UserDoc, message string, data map[string]string, initialSync bool) UserDoc {
+func DoHash(b []byte) (string, error) {
+	hasher := sha256.New()
+	if _, err := hasher.Write(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func MergeAutoDoc(doc UserDoc, message string, data map[string]string, initialSync bool) (UserDoc, error) {
+	var err error
 	doc.UpdatedAt = time.Now()
 	if !initialSync {
 		doc.Elements = append(doc.Elements, DocElement{
@@ -145,18 +156,24 @@ func MergeAutoDoc(doc UserDoc, message string, data map[string]string, initialSy
 		doc.SyncedAt = time.Now()
 		doc.Elements = []DocElement{}
 	}
-	doc.FromNumber = data["From"]
-	return doc
+	if doc.FromNumber, err = DoHash([]byte(data["From"])); err != nil {
+		return doc, err
+	}
+	return doc, nil
 }
 
 // HandleUserDoc attempts to link the inbound message with a document and perform cleanup.
 func HandleUserDoc(db *Database, messageBody string, fromNumber string) (string, *UserDoc, bool, error) {
 	userDoc := new(UserDoc)
+	fromHash, err := DoHash([]byte(fromNumber))
+	if err != nil {
+		return "", userDoc, false, err
+	}
 	queries := []Query{
 		{
 			path:  "fromNumber",
 			op:    "==",
-			value: fromNumber,
+			value: fromHash,
 		},
 	}
 	existingDocs, err := db.QueryDocs("inbound/pager/sessions", queries, OrderBy{"createdAt", firestore.Desc})
@@ -181,7 +198,7 @@ func HandleUserDoc(db *Database, messageBody string, fromNumber string) (string,
 		return "", userDoc, false, errors.New("Malformed document.")
 	}
 	// We have an explicit match and it's unclaimed or claimed by the caller.
-	if explicitDocPath != "" && (docFromString == "" || docFromString == fromNumber) {
+	if explicitDocPath != "" && (docFromString == "" || docFromString == fromHash) {
 		for _, d := range existingDocs {
 			if val, ok := d["docPath"]; ok && val.(string) != explicitDocPath {
 				if err := db.DeleteDoc(val.(string)); err != nil {
